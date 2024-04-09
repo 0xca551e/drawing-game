@@ -1,8 +1,19 @@
 @b palette {
   @e color {
     display: inline-block;
-    width: 50px;
-    height: 50px;
+    width: 40px;
+    height: 40px;
+    border-radius: 100%;
+  }
+}
+
+@b pen {
+  display: inline-block;
+  width: 40px;
+  height: 40px;
+  border-radius: 100%;
+  @e preview {
+    display: inline-block;
     border-radius: 100%;
   }
 }

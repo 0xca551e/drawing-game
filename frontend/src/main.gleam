@@ -1,4 +1,5 @@
 import colors
+import gleam/int
 import gleam/javascript.{type Reference} as js
 import gleam/list
 import lustre
@@ -123,6 +124,7 @@ pub type Msg {
   TryDraw(Int, Int)
   EndDrawing
   SetColor(String)
+  SetPenSize(Int)
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -199,6 +201,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     )
     EndDrawing -> #(Model(..model, drawing_at: Error(Nil)), effect.none())
     SetColor(color) -> #(Model(..model, pen_color: color), effect.none())
+    SetPenSize(size) -> #(Model(..model, pen_thickness: size), effect.none())
   }
 }
 
@@ -229,8 +232,32 @@ fn view(model: Model) -> Element(Msg) {
       [],
     )
   }
+  let pen_sizes = [4, 8, 16, 32]
+  let pen = fn(size) {
+    html.span(
+      [
+        attribute.role("button"),
+        attribute.class("pen"),
+        event.on_click(SetPenSize(size)),
+      ],
+      [
+        html.span(
+          [
+            attribute.class("pen__preview"),
+            attribute.style([
+              #("width", int.to_string(size) <> "px"),
+              #("height", int.to_string(size) <> "px"),
+              #("background-color", model.pen_color),
+            ]),
+          ],
+          [],
+        ),
+      ],
+    )
+  }
   html.div([], [
     html.div([attribute.class("palette")], list.map(colors, palette_color)),
+    html.div([attribute.class("pens")], list.map(pen_sizes, pen)),
     html.canvas([
       attribute.id("canvas"),
       attribute.width(640),
