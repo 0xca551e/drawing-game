@@ -1,5 +1,6 @@
 name = "frontend"
 version = "1.0.0"
+target = "javascript"
 
 # Fill out these fields if you intend to generate HTML documentation or publish
 # your project to the Hex package manager.
@@ -14,7 +15,10 @@ version = "1.0.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.34.0 and < 2.0.0"
-lustre = ">= 4.1.6 and < 5.0.0"
+# lustre = ">= 4.1.6 and < 5.0.0"
+lustre = { path = "../lustre" }
+gleam_javascript = ">= 0.8.0 and < 1.0.0"
+pprint = ">= 1.0.1 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

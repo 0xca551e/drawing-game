@@ -1,0 +1,3 @@
+[submodule "lustre"]
+	path = lustre
+	url = git@github.com:0xca551e/lustre.git
