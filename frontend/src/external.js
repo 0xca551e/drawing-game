@@ -1,5 +1,13 @@
 import { Ok, Error } from "../build/dev/javascript/prelude.mjs";
 
+export function getPosition(element) {
+  var clientRect = element.getBoundingClientRect();
+  return {
+    left: clientRect.left + document.body.scrollLeft,
+    top: clientRect.top + document.body.scrollTop,
+  };
+}
+
 export function getDocument() {
   return document;
 }

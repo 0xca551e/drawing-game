@@ -1,3 +1,6 @@
 [submodule "lustre"]
 	path = lustre
 	url = git@github.com:0xca551e/lustre.git
+[submodule "lumi"]
+	path = lumi
+	url = git@github.com:0xca551e/lumi.git

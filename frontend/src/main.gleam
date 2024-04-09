@@ -1,9 +1,12 @@
+import colors
 import gleam/javascript.{type Reference} as js
+import gleam/list
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/event
 import pprint
 
 type HtmlElement
@@ -11,6 +14,13 @@ type HtmlElement
 type MouseEvent
 
 pub type CanvasRenderingContext2D
+
+type HtmlElementPosition {
+  HtmlElementPosition(left: Int, top: Int)
+}
+
+@external(javascript, "./external.js", "getPosition")
+fn get_position(element: HtmlElement) -> HtmlElementPosition
 
 @external(javascript, "./external.js", "getDocument")
 fn document() -> HtmlElement
@@ -38,9 +48,6 @@ fn request_animation_frame(callback: fn(Int) -> Nil) -> Nil
 
 @external(javascript, "./external.js", "querySelector")
 fn query_selector(selector: String) -> Result(HtmlElement, Nil)
-
-@external(javascript, "./external.js", "eventTarget")
-fn mouse_event_target(e: MouseEvent) -> HtmlElement
 
 @external(javascript, "./external.js", "mouseX")
 fn event_mouse_x(e: MouseEvent) -> Int
@@ -115,6 +122,7 @@ pub type Msg {
   BeginDrawing(Int, Int)
   TryDraw(Int, Int)
   EndDrawing
+  SetColor(String)
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -132,11 +140,19 @@ fn init(_) -> #(Model, Effect(Msg)) {
         dispatch(SetRenderingContext(ctx))
 
         add_event_listener_mouse_down(canvas, fn(e) {
-          dispatch(BeginDrawing(event_mouse_x(e), event_mouse_y(e)))
+          let position = get_position(canvas)
+          dispatch(BeginDrawing(
+            event_mouse_x(e) - position.left,
+            event_mouse_y(e) - position.top,
+          ))
         })
         add_event_listener_mouse_up(document(), fn(_) { dispatch(EndDrawing) })
         add_event_listener_mouse_move(document(), fn(e) {
-          dispatch(TryDraw(event_mouse_x(e), event_mouse_y(e)))
+          let position = get_position(canvas)
+          dispatch(TryDraw(
+            event_mouse_x(e) - position.left,
+            event_mouse_y(e) - position.top,
+          ))
         })
       })
     }),
@@ -182,11 +198,39 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }),
     )
     EndDrawing -> #(Model(..model, drawing_at: Error(Nil)), effect.none())
+    SetColor(color) -> #(Model(..model, pen_color: color), effect.none())
   }
 }
 
 fn view(model: Model) -> Element(Msg) {
+  let assert Ok(gray) = colors.mix_hex(colors.gleam_black, colors.gleam_white)
+  let colors = [
+    colors.from_hsluv(10.0, 100.0, 60.0),
+    colors.from_hsluv(30.0, 100.0, 70.0),
+    colors.from_hsluv(60.0, 100.0, 83.0),
+    colors.from_hsluv(110.0, 100.0, 75.0),
+    colors.from_hsluv(240.0, 90.0, 55.0),
+    colors.from_hsluv(280.0, 50.0, 40.0),
+    colors.from_hsluv(40.0, 54.0, 48.0),
+    colors.gleam_black,
+    gray,
+    colors.gleam_white,
+    colors.gleam_unnamed_blue,
+    colors.gleam_faff_pink,
+  ]
+  let palette_color = fn(color) {
+    html.span(
+      [
+        attribute.role("button"),
+        attribute.class("palette__color"),
+        attribute.style([#("background-color", color)]),
+        event.on_click(SetColor(color)),
+      ],
+      [],
+    )
+  }
   html.div([], [
+    html.div([attribute.class("palette")], list.map(colors, palette_color)),
     html.canvas([
       attribute.id("canvas"),
       attribute.width(640),
