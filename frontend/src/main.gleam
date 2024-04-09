@@ -1,4 +1,5 @@
 import colors
+import gleam/bool
 import gleam/int
 import gleam/javascript.{type Reference} as js
 import gleam/list
@@ -91,28 +92,10 @@ fn line_to(
 @external(javascript, "./external.js", "stroke")
 fn stroke(ctx: CanvasRenderingContext2D) -> CanvasRenderingContext2D
 
-fn draw_line(
-  ctx: CanvasRenderingContext2D,
-  x1,
-  y1,
-  x2,
-  y2,
-  color color: String,
-  thickness thickness: Int,
-) {
-  ctx
-  |> set_stroke_style(color)
-  |> set_line_width(thickness)
-  |> begin_path()
-  |> move_to(x1, y1)
-  |> line_to(x2, y2)
-  |> stroke()
-}
-
 type Model {
   Model(
     rendering_context: Result(Reference(CanvasRenderingContext2D), Nil),
-    drawing_at: Result(#(Int, Int), Nil),
+    drawing: Bool,
     pen_color: String,
     pen_thickness: Int,
   )
@@ -131,7 +114,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
   #(
     Model(
       rendering_context: Error(Nil),
-      drawing_at: Error(Nil),
+      drawing: False,
       pen_color: "#000000",
       pen_thickness: 4,
     ),
@@ -168,38 +151,31 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       effect.none(),
     )
     BeginDrawing(x, y) -> #(
-      Model(..model, drawing_at: Ok(#(x, y))),
-      effect.none(),
-    )
-    TryDraw(x2, y2) -> #(
-      Model(
-        ..model,
-        drawing_at: case model.drawing_at {
-          Ok(_) -> Ok(#(x2, y2))
-          _ -> model.drawing_at
-        },
-      ),
+      Model(..model, drawing: True),
       effect.from(fn(_) {
-        case model.drawing_at {
-          Ok(#(x1, y1)) -> {
-            let assert Ok(ctx) = model.rendering_context
-            let ctx = js.dereference(ctx)
-            draw_line(
-              ctx,
-              x1,
-              y1,
-              x2,
-              y2,
-              color: model.pen_color,
-              thickness: model.pen_thickness,
-            )
-            Nil
-          }
-          _ -> Nil
-        }
+        let assert Ok(ctx) = model.rendering_context
+        ctx
+        |> js.dereference()
+        |> set_stroke_style(model.pen_color)
+        |> set_line_width(model.pen_thickness)
+        |> begin_path()
+        |> move_to(x, y)
+        Nil
       }),
     )
-    EndDrawing -> #(Model(..model, drawing_at: Error(Nil)), effect.none())
+    TryDraw(x, y) -> #(
+      model,
+      effect.from(fn(_) {
+        use <- bool.guard(!model.drawing, Nil)
+        let assert Ok(ctx) = model.rendering_context
+        ctx
+        |> js.dereference()
+        |> line_to(x, y)
+        |> stroke()
+        Nil
+      }),
+    )
+    EndDrawing -> #(Model(..model, drawing: False), effect.none())
     SetColor(color) -> #(Model(..model, pen_color: color), effect.none())
     SetPenSize(size) -> #(Model(..model, pen_thickness: size), effect.none())
   }
