@@ -3,12 +3,14 @@ import gleam/bool
 import gleam/int
 import gleam/javascript.{type Reference} as js
 import gleam/list
+import gleam/string
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import lustre_websocket as ws
 import pprint
 
 type HtmlElement
@@ -95,6 +97,7 @@ fn stroke(ctx: CanvasRenderingContext2D) -> CanvasRenderingContext2D
 type Model {
   Model(
     rendering_context: Result(Reference(CanvasRenderingContext2D), Nil),
+    socket: Result(ws.WebSocket, Nil),
     drawing: Bool,
     pen_color: String,
     pen_thickness: Int,
@@ -102,6 +105,8 @@ type Model {
 }
 
 pub type Msg {
+  WsWrapper(ws.WebSocketEvent)
+  SetSocket(ws.WebSocket)
   SetRenderingContext(CanvasRenderingContext2D)
   BeginDrawing(Int, Int)
   TryDraw(Int, Int)
@@ -114,89 +119,109 @@ fn init(_) -> #(Model, Effect(Msg)) {
   #(
     Model(
       rendering_context: Error(Nil),
+      socket: Error(Nil),
       drawing: False,
       pen_color: "#000000",
       pen_thickness: 4,
     ),
-    effect.from(fn(dispatch) {
-      request_animation_frame(fn(_) {
-        let assert Ok(canvas) = query_selector("#canvas")
-        let ctx = get_context(canvas)
-        dispatch(SetRenderingContext(ctx))
+    effect.batch([
+      ws.init("/ws", WsWrapper),
+      effect.from(fn(dispatch) {
+        request_animation_frame(fn(_) {
+          let assert Ok(canvas) = query_selector("#canvas")
+          let ctx = get_context(canvas)
+          dispatch(SetRenderingContext(ctx))
 
-        add_event_listener_mouse_down(canvas, fn(e) {
-          let position = get_position(canvas)
-          dispatch(BeginDrawing(
-            event_mouse_x(e) - position.left,
-            event_mouse_y(e) - position.top,
-          ))
+          add_event_listener_mouse_down(canvas, fn(e) {
+            let position = get_position(canvas)
+            dispatch(BeginDrawing(
+              event_mouse_x(e) - position.left,
+              event_mouse_y(e) - position.top,
+            ))
+          })
+          add_event_listener_mouse_up(document(), fn(_) { dispatch(EndDrawing) })
+          add_event_listener_mouse_move(document(), fn(e) {
+            let position = get_position(canvas)
+            dispatch(TryDraw(
+              event_mouse_x(e) - position.left,
+              event_mouse_y(e) - position.top,
+            ))
+          })
         })
-        add_event_listener_mouse_up(document(), fn(_) { dispatch(EndDrawing) })
-        add_event_listener_mouse_move(document(), fn(e) {
-          let position = get_position(canvas)
-          dispatch(TryDraw(
-            event_mouse_x(e) - position.left,
-            event_mouse_y(e) - position.top,
-          ))
-        })
-      })
-    }),
+      }),
+    ]),
   )
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
+    WsWrapper(event) -> #(
+      model,
+      effect.from(fn(dispatch) {
+        let wrapper = case event {
+          ws.InvalidUrl -> panic
+          ws.OnOpen(socket) -> dispatch(SetSocket(socket))
+          ws.OnTextMessage(msg) -> todo as "handle text message"
+          ws.OnBinaryMessage(bits) -> todo as "handle binary message"
+          ws.OnClose(reason) -> todo as "handle close"
+        }
+      }),
+    )
+    SetSocket(socket) -> #(Model(..model, socket: Ok(socket)), effect.none())
     SetRenderingContext(ctx) -> #(
       Model(..model, rendering_context: Ok(js.make_reference(ctx))),
       effect.none(),
     )
-    BeginDrawing(x, y) -> #(
-      Model(..model, drawing: True),
-      effect.from(fn(_) {
-        let assert Ok(ctx) = model.rendering_context
-        ctx
-        |> js.dereference()
-        |> set_stroke_style(model.pen_color)
-        |> set_line_width(model.pen_thickness)
-        |> begin_path()
-        |> move_to(x, y)
-        Nil
-      }),
-    )
-    TryDraw(x, y) -> #(
-      model,
-      effect.from(fn(_) {
-        use <- bool.guard(!model.drawing, Nil)
-        let assert Ok(ctx) = model.rendering_context
-        ctx
-        |> js.dereference()
-        |> line_to(x, y)
-        |> stroke()
-        Nil
-      }),
-    )
+    BeginDrawing(x, y) -> #(Model(..model, drawing: True), {
+      let assert Ok(socket) = model.socket
+      effect.batch([
+        ws.send(
+          socket,
+          string.join(["begin", int.to_string(x), int.to_string(y)], ","),
+        ),
+        effect.from(fn(_) {
+          let assert Ok(ctx) = model.rendering_context
+          ctx
+          |> js.dereference()
+          |> set_stroke_style(model.pen_color)
+          |> set_line_width(model.pen_thickness)
+          |> begin_path()
+          |> move_to(x, y)
+          Nil
+        }),
+      ])
+    })
+    TryDraw(x, y) -> #(model, {
+      use <- bool.guard(!model.drawing, effect.none())
+      let assert Ok(socket) = model.socket
+      effect.batch([
+        ws.send(
+          socket,
+          string.join(["draw", int.to_string(x), int.to_string(y)], ","),
+        ),
+        effect.from(fn(_) {
+          let assert Ok(ctx) = model.rendering_context
+          ctx
+          |> js.dereference()
+          |> line_to(x, y)
+          |> stroke()
+          Nil
+        }),
+      ])
+    })
     EndDrawing -> #(Model(..model, drawing: False), effect.none())
-    SetColor(color) -> #(Model(..model, pen_color: color), effect.none())
-    SetPenSize(size) -> #(Model(..model, pen_thickness: size), effect.none())
+    SetColor(color) -> #(Model(..model, pen_color: color), {
+      let assert Ok(socket) = model.socket
+      ws.send(socket, string.join(["pen_color", color], ","))
+    })
+    SetPenSize(size) -> #(Model(..model, pen_thickness: size), {
+      let assert Ok(socket) = model.socket
+      ws.send(socket, string.join(["pen_thickness", int.to_string(size)], ","))
+    })
   }
 }
 
 fn view(model: Model) -> Element(Msg) {
-  let assert Ok(gray) = colors.mix_hex(colors.gleam_black, colors.gleam_white)
-  let colors = [
-    colors.from_hsluv(10.0, 100.0, 60.0),
-    colors.from_hsluv(30.0, 100.0, 70.0),
-    colors.from_hsluv(60.0, 100.0, 83.0),
-    colors.from_hsluv(110.0, 100.0, 75.0),
-    colors.from_hsluv(240.0, 90.0, 55.0),
-    colors.from_hsluv(280.0, 50.0, 40.0),
-    colors.from_hsluv(40.0, 54.0, 48.0),
-    colors.gleam_black,
-    gray,
-    colors.gleam_white,
-    colors.gleam_unnamed_blue,
-    colors.gleam_faff_pink,
-  ]
   let palette_color = fn(color) {
     html.span(
       [
@@ -232,7 +257,10 @@ fn view(model: Model) -> Element(Msg) {
     )
   }
   html.div([], [
-    html.div([attribute.class("palette")], list.map(colors, palette_color)),
+    html.div(
+      [attribute.class("palette")],
+      list.map(colors.colors(), palette_color),
+    ),
     html.div([attribute.class("pens")], list.map(pen_sizes, pen)),
     html.canvas([
       attribute.id("canvas"),
